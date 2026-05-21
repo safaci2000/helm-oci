@@ -121,7 +121,7 @@ jobs:
           MATRIX_ARCH: ${{ matrix.arch }}
         run: |
           mkdir -p release/helm-oci/bin
-          cp plugin.yaml install-binary.sh release/helm-oci/
+          cp plugin.yaml install.sh release/helm-oci/
           EXT=""
           if [ "$MATRIX_OS" = "windows" ]; then EXT=".exe"; fi
           cp "dist/helm-oci${EXT}" release/helm-oci/bin/
