@@ -163,10 +163,14 @@ jobs:
       - name: Import GPG signing key
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
+          mkdir -p ~/.gnupg
+          echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
           echo "$GPG_PRIVATE_KEY" | gpg --batch --import
           gpg --export > ~/.gnupg/pubring.gpg
-          gpg --batch --pinentry-mode loopback --export-secret-keys > /tmp/secring.gpg
+          gpg --batch --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
+            --export-secret-keys > /tmp/secring.gpg
           mv /tmp/secring.gpg ~/.gnupg/secring.gpg
 
       - name: Create signed source package
