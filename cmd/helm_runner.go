@@ -18,7 +18,7 @@ func (execRunner) Run(args []string, stdout, stderr io.Writer) error {
 		helmBin = "helm"
 	}
 
-	cmd := exec.Command(helmBin, args...) // #nosec G204 -- helmBin is operator-controlled via HELM_BIN env var
+	cmd := exec.Command(helmBin, args...) // #nosec G204 G702 -- helmBin is operator-controlled via HELM_BIN env var
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	cmd.Stdin = os.Stdin
