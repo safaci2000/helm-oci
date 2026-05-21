@@ -36,27 +36,42 @@ When managing multiple OCI charts across clusters, remembering and retyping thes
 
 ## Solution
 
-`helm-oci` is a Helm plugin which solves this UX problem with Helm and lets you bookmark OCI chart URLs and reference them by name.
+`helm-oci` is a Helm plugin which solves this UX problem and lets you bookmark OCI chart URLs and reference them by name.
 
 ```
-helm oci add envoy-gw oci://docker.io/envoyproxy/gateway-helm
-helm oci install envoy-gw my-gateway --version 1.7.0
-helm oci values envoy-gw --version 1.7.0
-helm oci upgrade envoy-gw my-gateway --version 1.8.0
+❯ helm oci
+Manage local bookmarks for OCI-based Helm charts.
+
+Add OCI chart URLs once, then reference them by name for install,
+upgrade, pull, show, values, template, and version listing.
+
+Usage:
+  oci [command]
+
+Available Commands:
+  add         Bookmark an OCI chart reference
+  completion  Generate the autocompletion script for the specified shell
+  help        Help about any command
+  install     Install a bookmarked OCI chart
+  list        List all bookmarked OCI chart references
+  pull        Pull a bookmarked OCI chart
+  remove      Remove a bookmarked OCI chart reference
+  show        Show chart metadata for a bookmarked OCI chart
+  template    Render templates for a bookmarked OCI chart
+  upgrade     Upgrade a release using a bookmarked OCI chart
+  values      Show values for a bookmarked OCI chart
+  versions    List available versions for a bookmarked OCI chart
+
+❯ helm oci add envoy-gw oci://docker.io/envoyproxy/gateway-helm
+❯ helm oci install envoy-gw my-gateway --version 1.7.0
+❯ helm oci values envoy-gw --version 1.7.0
+❯ helm oci upgrade envoy-gw my-gateway --version 1.8.0
 ```
 
 ## Installation
 
 ```
 helm plugin install https://github.com/esnet/helm-oci
-```
-
-For local development:
-
-```
-git clone https://github.com/esnet/helm-oci.git
-cd helm-oci
-make install
 ```
 
 ## Commands

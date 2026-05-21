@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 
 PROJECT_NAME="helm-oci"
-PROJECT_GH="kagraw/$PROJECT_NAME"
+PROJECT_GH="esnet/$PROJECT_NAME"
 
 if command -v cygpath >/dev/null 2>&1; then
   HELM_BIN="$(cygpath -u "${HELM_BIN}")"
