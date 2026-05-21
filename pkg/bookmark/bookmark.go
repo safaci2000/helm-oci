@@ -44,7 +44,7 @@ func (s *Store) load() (fileData, error) {
 }
 
 func (s *Store) save(data fileData) error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o750); err != nil {
 		return fmt.Errorf("creating bookmark directory: %w", err)
 	}
 
@@ -52,7 +52,7 @@ func (s *Store) save(data fileData) error {
 	if err != nil {
 		return fmt.Errorf("marshaling bookmarks: %w", err)
 	}
-	return os.WriteFile(s.path, raw, 0o644)
+	return os.WriteFile(s.path, raw, 0o600)
 }
 
 func (s *Store) Add(name, url string) error {
