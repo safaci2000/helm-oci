@@ -166,6 +166,7 @@ jobs:
         run: |
           echo "$GPG_PRIVATE_KEY" | gpg --batch --import
           gpg --export > ~/.gnupg/pubring.gpg
+          gpg --export-secret-keys > ~/.gnupg/secring.gpg
 
       - name: Create signed source package
         env:
