@@ -13,7 +13,7 @@ A Helm plugin that adds local bookmarking for OCI-based Helm charts.
   - [Installing and Managing Releases](#installing-and-managing-releases)
 - [Bookmark Storage](#bookmark-storage)
 - [Development](#development)
-- [License](#license)
+- [License](LICENSE.md)
 
 ## Problem
 
