@@ -163,7 +163,9 @@ jobs:
       - name: Import GPG signing key
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-        run: echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          gpg --export > ~/.gnupg/pubring.gpg
 
       - name: Create signed source package
         env:
