@@ -74,7 +74,7 @@ Available Commands:
 
 ```
 
-helm plugin install <https://github.com/esnet/helm-oci>
+helm plugin install https://github.com/esnet/helm-oci
 
 ```
 
