@@ -1,0 +1,10 @@
+name: "oci"
+version: "0.1.0"
+usage: "Bookmark and manage OCI Helm chart references"
+description: |-
+  Manage local bookmarks for OCI-based Helm charts.
+  Never look up an OCI URL again — add it once, then use it by name.
+command: "$HELM_PLUGIN_DIR/bin/helm-oci"
+hooks:
+  install: "$HELM_PLUGIN_DIR/install-binary.sh"
+  update: "$HELM_PLUGIN_DIR/install-binary.sh -u"

@@ -1,0 +1,25 @@
+package cmd
+
+import (
+	"github.com/spf13/cobra"
+)
+
+func newInstallCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:                "install <name> <release> [flags]",
+		Short:              "Install a bookmarked OCI chart",
+		Args:               cobra.MinimumNArgs(2),
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name, release, extra := args[0], args[1], args[2:]
+			b, err := getStore().Get(name)
+			if err != nil {
+				return err
+			}
+
+			helmArgs := append([]string{"install", release, b.URL}, extra...)
+			return runner.Run(helmArgs, cmd.OutOrStdout(), cmd.ErrOrStderr())
+		},
+	}
+	return cmd
+}

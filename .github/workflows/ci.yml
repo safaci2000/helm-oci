@@ -1,0 +1,183 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+env:
+  GO_VERSION: '1.26'
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Check formatting
+        run: |
+          UNFORMATTED=$(gofmt -l .)
+          if [ -n "$UNFORMATTED" ]; then
+            echo "The following files are not properly formatted:"
+            echo "$UNFORMATTED"
+            exit 1
+          fi
+
+      - name: Run staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          staticcheck ./...
+
+      - name: Run go vet
+        run: go vet ./...
+
+  test:
+    name: Run unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run tests
+        run: go test -v -race ./...
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run gosec
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          gosec -severity high ./...
+
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  build:
+    name: Build (${{ matrix.os }}_${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    needs: [lint, security-scan, test]
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+          - os: linux
+            arch: arm64
+          - os: darwin
+            arch: amd64
+          - os: darwin
+            arch: arm64
+          - os: windows
+            arch: amd64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: '0'
+        run: |
+          EXT=""
+          if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
+          mkdir -p dist
+          go build -trimpath -ldflags="-X main.version=$(sed -n 's/version:.*"\(.*\)"/\1/p' plugin.yaml)" \
+            -o "dist/helm-oci${EXT}" .
+
+      - name: Package archive
+        env:
+          MATRIX_OS: ${{ matrix.os }}
+          MATRIX_ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p release/helm-oci/bin
+          cp plugin.yaml install-binary.sh release/helm-oci/
+          EXT=""
+          if [ "$MATRIX_OS" = "windows" ]; then EXT=".exe"; fi
+          cp "dist/helm-oci${EXT}" release/helm-oci/bin/
+          tar -C release -zcvf "helm-oci-${MATRIX_OS}-${MATRIX_ARCH}.tgz" helm-oci/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: helm-oci-${{ matrix.os }}-${{ matrix.arch }}
+          path: helm-oci-${{ matrix.os }}-${{ matrix.arch }}.tgz
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: helm-oci-*
+          merge-multiple: true
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum helm-oci-*.tgz > SHA256SUMS
+
+      - name: Sign artifacts
+        run: |
+          for archive in dist/helm-oci-*.tgz; do
+            cosign sign-blob --yes --bundle="${archive}.bundle" "$archive"
+          done
+
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ steps.version.outputs.VERSION }}
+          generate_release_notes: true
+          files: |
+            dist/helm-oci-*.tgz
+            dist/helm-oci-*.tgz.bundle
+            dist/SHA256SUMS
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
