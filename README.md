@@ -62,16 +62,20 @@ Available Commands:
   values      Show values for a bookmarked OCI chart
   versions    List available versions for a bookmarked OCI chart
 
+
 ❯ helm oci add envoy-gw oci://docker.io/envoyproxy/gateway-helm
 ❯ helm oci install envoy-gw my-gateway --version 1.7.0
 ❯ helm oci values envoy-gw --version 1.7.0
 ❯ helm oci upgrade envoy-gw my-gateway --version 1.8.0
+
 ```
 
 ## Installation
 
 ```
-helm plugin install https://github.com/esnet/helm-oci
+
+helm plugin install <https://github.com/esnet/helm-oci>
+
 ```
 
 ## Commands
