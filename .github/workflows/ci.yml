@@ -173,6 +173,7 @@ jobs:
           gpg --batch --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
             --export-secret-keys "$GPG_KEY_ID" > /tmp/secring.gpg
           mv /tmp/secring.gpg ~/.gnupg/secring.gpg
+          gpg --armor --export "$GPG_KEY_ID" > helm-oci-release.pub.asc
 
       - name: Create signed source package
         env:
@@ -187,6 +188,9 @@ jobs:
           --key "$GPG_KEY_ID" \
           --keyring ~/.gnupg/secring.gpg \
           --passphrase-file -
+          for f in dist/oci-*.tgz dist/oci-*.tgz.prov; do
+            mv "$f" "${f/dist\/oci-/dist\/helm-oci-}"
+          done
 
       - name: Generate checksums
         run: |
