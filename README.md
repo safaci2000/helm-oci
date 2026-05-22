@@ -72,11 +72,7 @@ Available Commands:
 
 ## Installation
 
-```bash
-helm plugin install oci://ghcr.io/esnet/helm-oci/oci:0.1.13
-```
-
-Or install from source (requires `--verify=false`):
+Helm 4 requires plugin verification by default. Since this plugin does not yet provide provenance artifacts use `--verify=false` to install.
 
 ```bash
 helm plugin install https://github.com/esnet/helm-oci --verify=false
