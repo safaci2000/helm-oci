@@ -164,13 +164,14 @@ jobs:
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
         run: |
           mkdir -p ~/.gnupg
           echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
           echo "$GPG_PRIVATE_KEY" | gpg --batch --import
           gpg --export > ~/.gnupg/pubring.gpg
           gpg --batch --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
-            --export-secret-keys > /tmp/secring.gpg
+            --export-secret-keys "$GPG_KEYID" > /tmp/secring.gpg
           mv /tmp/secring.gpg ~/.gnupg/secring.gpg
 
       - name: Create signed source package
@@ -180,14 +181,11 @@ jobs:
         run: |
           mkdir -p staging/helm-oci
           cp plugin.yaml install-binary.sh staging/helm-oci/
-          printf '%s' "$GPG_PASSPHRASE" > /tmp/passphrase.txt
-          helm plugin package \
-            --sign \
-            --key "$GPG_KEY_ID" \
-            --passphrase-file /tmp/passphrase.txt \
-            -d dist/ \
-            staging/helm-oci/
-          rm -f /tmp/passphrase.txt
+          echo "$GPG_PASSPHRASE" | helm plugin package staging/helm-oci/ \
+          -d dist/
+          --key "$GPG_KEYID" \
+          --keyring ~/.gnupg/secring.gpg \
+          --passphrase-file -
 
       - name: Generate checksums
         run: |
