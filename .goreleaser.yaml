@@ -69,9 +69,9 @@ checksum:
 # ── Signing ───────────────────────────────────────────────────────────────────
 # GoReleaser signs the checksum file (and therefore transitively covers all
 # platform archives) using the GPG key supplied via CI secrets.
-# The helm plugin provenance (.prov) file is produced by a separate CI step
-# using `helm plugin package --key` because that format is specific to Helm's
-# verify workflow and cannot be generated here.
+# Helm-native provenance (.prov) files are produced by a post-GoReleaser CI
+# step using `helm plugin package --sign` and verified with `helm plugin verify`
+# before being uploaded to the GitHub Release alongside the GoReleaser archives.
 signs:
   - id: gpg-sign
     # Sign only the checksum file; individual archives are covered by it.
@@ -120,18 +120,29 @@ release:
 
     ### Verify
 
-    Import the signing key and verify the checksum file:
+    #### Using Helm (recommended, requires Helm 4)
+
+    Download the signed tarball and its provenance file for your platform, then verify:
+
+    ```bash
+    helm plugin verify oci-{{ .Version }}.tgz
+    ```
+
+    Import the signing key first if Helm reports an unknown key:
+
+    ```bash
+    gpg --import helm-oci-signing-key.asc
+    helm plugin verify oci-{{ .Version }}.tgz
+    ```
+
+    #### Using GPG + sha256sum
+
+    Import the signing key and verify the checksum file covers the GoReleaser archives:
 
     ```bash
     gpg --import helm-oci-signing-key.asc
     gpg --verify {{ .ProjectName }}_{{ .Version }}_checksums.txt.asc {{ .ProjectName }}_{{ .Version }}_checksums.txt
     sha256sum -c {{ .ProjectName }}_{{ .Version }}_checksums.txt
-    ```
-
-    Verify the Helm plugin package provenance:
-
-    ```bash
-    helm verify helm-oci-{{ .Version }}.tgz
     ```
 
 # ── Changelog ─────────────────────────────────────────────────────────────────

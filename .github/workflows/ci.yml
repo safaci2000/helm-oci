@@ -81,23 +81,23 @@ jobs:
 
   # ── Release (v* tags only) ─────────────────────────────────────────────────
   #
-  # Responsibilities are split between GoReleaser and a post-release step:
+  # GoReleaser handles the core release:
+  #   - Cross-compiles all 5 platform binaries (linux/amd64, linux/arm64,
+  #     darwin/amd64, darwin/arm64, windows/amd64)
+  #   - Packages each binary into a helm-oci-<os>-<arch>.tgz archive whose
+  #     directory layout (helm-oci/bin/, helm-oci/plugin.yaml, …) is exactly
+  #     what install-binary.sh expects
+  #   - Generates a sha256 checksum file
+  #   - GPG-signs the checksum file (--detach-sign --armor → .asc)
+  #   - Creates the GitHub Release and uploads all artifacts
   #
-  #   GoReleaser:
-  #     - Cross-compiles all 5 platform binaries (linux/amd64, linux/arm64,
-  #       darwin/amd64, darwin/arm64, windows/amd64)
-  #     - Packages each binary into a helm-oci-<os>-<arch>.tgz archive whose
-  #       directory layout (helm-oci/bin/, helm-oci/plugin.yaml, …) is exactly
-  #       what install-binary.sh expects
-  #     - Generates a sha256 checksum file
-  #     - GPG-signs the checksum file (--detach-sign --armor → .asc)
-  #     - Creates the GitHub Release and uploads all artifacts
-  #
-  #   Post-GoReleaser step:
-  #     - Uses `helm plugin package` to produce a Helm provenance file (.prov)
-  #       so users can run `helm verify` against the plugin package
-  #     - Exports the public signing key as helm-oci-signing-key.asc
-  #     - Uploads both files to the release created by GoReleaser
+  # Post-GoReleaser steps then:
+  #   - Run `helm plugin package --sign` on each platform archive to produce
+  #     Helm-native provenance (.prov) files (requires Helm 4)
+  #   - Validate every .prov file with `helm plugin verify` before publishing
+  #   - Upload the .prov files, Helm-packaged .tgz files, and the public
+  #     signing key to the GitHub Release so consumers can run:
+  #       helm plugin verify oci-<version>.tgz
 
   release:
     name: Release
@@ -144,49 +144,102 @@ jobs:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
           GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
 
-      # Produce the Helm plugin provenance file so users can run:
-      #   helm verify helm-oci-<version>.tgz
-      # This step uses the same GPG key that GoReleaser used for the checksum
-      # signature above, so a single key covers all release artifacts.
-      - name: Install Helm
-        uses: azure/setup-helm@v4
-        with:
-          version: 'latest'
+      # Install Helm 4 so we can use `helm plugin package --sign` and
+      # `helm plugin verify` — both are Helm 4-only commands.
+      - name: Install Helm 4
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 \
+            | DESIRED_VERSION=v4.0.0 bash
 
-      - name: Build Helm plugin provenance (.prov)
+      # For each GoReleaser-produced platform archive, extract the inner
+      # helm-oci/ plugin directory and run `helm plugin package --sign` against
+      # it. This produces a Helm-native tarball + .prov provenance file for
+      # every platform that users can verify with `helm plugin verify`.
+      #
+      # The passphrase is written to a temp file so it never appears in
+      # process arguments or logs, and cleaned up immediately afterwards.
+      - name: Sign plugin archives with helm plugin package
         env:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
           GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
           TAG: ${{ github.ref_name }}
         run: |
-          # Assemble a minimal plugin source directory that `helm plugin package`
-          # understands (it only needs plugin.yaml and install-binary.sh).
-          mkdir -p staging/helm-oci
-          cp plugin.yaml install-binary.sh staging/helm-oci/
+          set -euo pipefail
 
-          echo "$GPG_PASSPHRASE" | helm plugin package \
-            staging/helm-oci/ \
-            --destination dist/ \
-            --key "$GPG_KEY_ID" \
-            --keyring /tmp/secring.gpg \
-            --passphrase-file -
+          # Write the passphrase to a temp file; helm reads it with --passphrase-file.
+          PASSPHRASE_FILE="$(mktemp)"
+          printf '%s' "$GPG_PASSPHRASE" > "$PASSPHRASE_FILE"
+          trap 'rm -f "$PASSPHRASE_FILE"' EXIT
 
-          # Export the public key so release consumers can import it easily.
-          gpg --batch --yes --armor \
-              --export "$GPG_KEY_ID" \
-              > dist/helm-oci-signing-key.asc
+          mkdir -p helm-provenance
 
-          # Scrub the secret keyring from disk.
-          rm -f /tmp/secring.gpg
+          # Platforms matching the GoReleaser build matrix (windows/arm64 is excluded).
+          PLATFORMS="linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 windows-amd64"
 
-      # Attach the provenance file and public key to the GitHub Release that
-      # GoReleaser already created in the previous step.
-      - name: Upload Helm provenance to release
+          for PLATFORM in $PLATFORMS; do
+            ARCHIVE="dist/helm-oci-${PLATFORM}.tgz"
+            if [ ! -f "$ARCHIVE" ]; then
+              echo "Warning: $ARCHIVE not found, skipping"
+              continue
+            fi
+
+            WORK_DIR="$(mktemp -d)"
+            trap 'rm -rf "$WORK_DIR"' EXIT
+
+            # Extract the archive; GoReleaser wraps everything under helm-oci/.
+            tar -xzf "$ARCHIVE" -C "$WORK_DIR"
+
+            # Package and sign the extracted plugin directory.
+            # helm plugin package reads the plugin version from plugin.yaml,
+            # so the output tarball is named oci-<version>.tgz (plugin name from manifest).
+            helm plugin package \
+              --sign \
+              --key "$GPG_KEY_ID" \
+              --keyring /tmp/secring.gpg \
+              --passphrase-file "$PASSPHRASE_FILE" \
+              --destination helm-provenance/ \
+              "$WORK_DIR/helm-oci"
+
+            echo "Packaged and signed $PLATFORM"
+          done
+
+      # Verify every provenance file we just produced before uploading anything.
+      # This catches key misconfiguration or packaging errors before they reach
+      # end users.
+      - name: Verify helm plugin provenance files
+        run: |
+          set -euo pipefail
+          for PROV in helm-provenance/*.prov; do
+            TARBALL="${PROV%.prov}"
+            echo "Verifying $TARBALL ..."
+            helm plugin verify --keyring ~/.gnupg/pubring.gpg "$TARBALL"
+          done
+          echo "All provenance files verified successfully."
+
+      # Export the public key and attach it to the GitHub Release so consumers
+      # can import it and verify without hunting for the key.
+      - name: Upload release assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
+          set -euo pipefail
+
+          gpg --batch --yes --armor \
+              --export "${{ secrets.GPG_KEY_ID }}" \
+              > helm-oci-signing-key.asc
+
+          rm -f /tmp/secring.gpg
+
+          # Upload the public signing key.
           gh release upload "$TAG" \
-            dist/helm-oci-*.tgz.prov \
-            dist/helm-oci-signing-key.asc \
+            helm-oci-signing-key.asc \
+            --clobber
+
+          # Upload all Helm-native tarballs and their provenance files.
+          # These are separate from the GoReleaser archives and are what
+          # `helm plugin verify` operates on.
+          gh release upload "$TAG" \
+            helm-provenance/*.tgz \
+            helm-provenance/*.prov \
             --clobber
