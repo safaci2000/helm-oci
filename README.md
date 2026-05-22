@@ -15,6 +15,12 @@ A Helm plugin that adds local bookmarking for OCI-based Helm charts.
 - [Development](#development)
 - [License](LICENSE.md)
 
+## Installation
+
+```bash
+helm plugin install https://github.com/esnet/helm-oci/releases/download/v1.0.0/oci-1.0.0.tgz
+```
+
 ## Problem
 
 Helm's traditional repository system lets you add a repo once and reference charts by short name:
@@ -62,23 +68,9 @@ Available Commands:
   values      Show values for a bookmarked OCI chart
   versions    List available versions for a bookmarked OCI chart
 
-
-❯ helm oci add envoy-gw oci://docker.io/envoyproxy/gateway-helm
-❯ helm oci install envoy-gw my-gateway --version 1.7.0
-❯ helm oci values envoy-gw --version 1.7.0
-❯ helm oci upgrade envoy-gw my-gateway --version 1.8.0
-
 ```
 
-## Installation
-
-Helm 4 requires plugin verification by default. Since this plugin does not yet provide provenance artifacts use `--verify=false` to install.
-
-```bash
-helm plugin install https://github.com/esnet/helm-oci --verify=false
-```
-
-## Commands
+## Usage
 
 ### Managing Bookmarks
 
