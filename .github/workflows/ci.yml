@@ -195,9 +195,9 @@ jobs:
 
       - name: Push to OCI registry
         run: |
-          VERSION="${GITHUB_REF#refs/tags/v}"
-          PACKAGE="dist/helm-oci-${VERSION}.tgz"
-          oras push ghcr.io/esnet/helm-oci:${VERSION} \
+          TAG="${GITHUB_REF#refs/tags/v}"
+          PACKAGE=$(ls dist/helm-oci-[0-9]*.tgz | head -1)
+          oras push ghcr.io/esnet/helm-oci:${TAG} \
             --artifact-type application/vnd.helm.plugin.v1+json \
             ${PACKAGE} \
             ${PACKAGE}.prov
