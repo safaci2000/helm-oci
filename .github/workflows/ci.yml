@@ -140,7 +140,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
-      id-token: write
+      packages: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -157,51 +157,50 @@ jobs:
         with:
           version: 'latest'
 
-      - name: Install cosign
-        uses: sigstore/cosign-installer@v3
-
-      - name: Import GPG signing key & Create signed source package
+      - name: Package and sign plugin
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
           GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
         run: |
-          mkdir -p ~/.gnupg
-          echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
           echo "$GPG_PRIVATE_KEY" | gpg --batch --import
-          gpg --export > ~/.gnupg/pubring.gpg
           gpg --batch --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
             --export-secret-keys "$GPG_KEY_ID" > /tmp/secring.gpg
-          mv /tmp/secring.gpg ~/.gnupg/secring.gpg
-          gpg --armor --export "$GPG_KEY_ID" > helm-oci-release.pub.asc
 
-      - name: Create signed source package
-        env:
-          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-        run: |
           mkdir -p staging/helm-oci
           cp plugin.yaml install-binary.sh staging/helm-oci/
+
           echo "$GPG_PASSPHRASE" | helm plugin package \
-          staging/helm-oci/ \
-          --destination dist/  \
-          --key "$GPG_KEY_ID" \
-          --keyring ~/.gnupg/secring.gpg \
-          --passphrase-file -
+            staging/helm-oci/ \
+            --destination dist/ \
+            --key "$GPG_KEY_ID" \
+            --keyring /tmp/secring.gpg \
+            --passphrase-file -
+
           for f in dist/oci-*.tgz dist/oci-*.tgz.prov; do
             mv "$f" "${f/dist\/oci-/dist\/helm-oci-}"
           done
 
-      - name: Generate checksums
-        run: |
-          cd dist
-          sha256sum helm-oci-*.tgz > SHA256SUMS
+          rm -f /tmp/secring.gpg
 
-      - name: Sign per-platform artifacts with cosign
+      - name: Set up ORAS
+        uses: oras-project/setup-oras@v1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push to OCI registry
         run: |
-          for archive in dist/helm-oci-*.tgz; do
-            cosign sign-blob --yes --bundle="${archive}.bundle" "$archive"
-          done
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          PACKAGE="dist/helm-oci-${VERSION}.tgz"
+          oras push ghcr.io/esnet/helm-oci:${VERSION} \
+            --artifact-type application/vnd.helm.plugin.v1+json \
+            ${PACKAGE} \
+            ${PACKAGE}.prov
 
       - name: Get version
         id: version
@@ -213,7 +212,7 @@ jobs:
           TAG: ${{ steps.version.outputs.VERSION }}
         run: |
           TITLE=$(git tag -l --format='%(contents:subject)' "$TAG")
-          ASSETS=$(echo dist/helm-oci-*.tgz dist/helm-oci-*.tgz.prov dist/helm-oci-*.tgz.bundle dist/SHA256SUMS helm-oci-release.pub.asc)
+          ASSETS=$(echo dist/helm-oci-*.tgz dist/helm-oci-*.tgz.prov)
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" $ASSETS --clobber
           else
