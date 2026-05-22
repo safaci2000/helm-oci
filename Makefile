@@ -28,10 +28,6 @@ uninstall:
 clean:
 	rm -rf bin/
 
-.PHONY: snapshot
-snapshot:
-	goreleaser release --snapshot --clean --skip=sign,publish
-
 .PHONY: dist
 dist: export CGO_ENABLED=0
 dist:

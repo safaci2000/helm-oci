@@ -11,8 +11,6 @@ env:
   GO_VERSION: '1.26'
 
 jobs:
-  # ── Quality gates (run on every push and PR) ───────────────────────────────
-
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -79,114 +77,123 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
 
-  # ── Release (v* tags only) ─────────────────────────────────────────────────
-  #
-  # Responsibilities are split between GoReleaser and a post-release step:
-  #
-  #   GoReleaser:
-  #     - Cross-compiles all 5 platform binaries (linux/amd64, linux/arm64,
-  #       darwin/amd64, darwin/arm64, windows/amd64)
-  #     - Packages each binary into a helm-oci-<os>-<arch>.tgz archive whose
-  #       directory layout (helm-oci/bin/, helm-oci/plugin.yaml, …) is exactly
-  #       what install-binary.sh expects
-  #     - Generates a sha256 checksum file
-  #     - GPG-signs the checksum file (--detach-sign --armor → .asc)
-  #     - Creates the GitHub Release and uploads all artifacts
-  #
-  #   Post-GoReleaser step:
-  #     - Uses `helm plugin package` to produce a Helm provenance file (.prov)
-  #       so users can run `helm verify` against the plugin package
-  #     - Exports the public signing key as helm-oci-signing-key.asc
-  #     - Uploads both files to the release created by GoReleaser
-
-  release:
-    name: Release
+  build:
+    name: Build (${{ matrix.os }}_${{ matrix.arch }})
     runs-on: ubuntu-latest
-    needs: [lint, test, security-scan]
-    if: startsWith(github.ref, 'refs/tags/v')
-    permissions:
-      contents: write  # create GitHub releases and upload assets
-
+    needs: [lint, security-scan, test]
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+          - os: linux
+            arch: arm64
+          - os: darwin
+            arch: amd64
+          - os: darwin
+            arch: arm64
+          - os: windows
+            arch: amd64
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # GoReleaser needs full history for changelog
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      # Import the GPG key before GoReleaser runs so the `signs:` block can
-      # invoke gpg with the key already present in the agent's keyring.
-      - name: Import GPG key
+      - name: Build binary
         env:
-          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: '0'
         run: |
-          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
-          # Export the secret key to a temporary keyring so helm can use it
-          # in the plugin-package step below (helm requires a legacy keyring).
-          gpg --batch --pinentry-mode loopback \
-              --passphrase "$GPG_PASSPHRASE" \
-              --export-secret-keys "${{ secrets.GPG_KEY_ID }}" \
-              > /tmp/secring.gpg
+          EXT=""
+          if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
+          mkdir -p dist
+          go build -trimpath -ldflags="-X main.version=$(sed -n 's/version:.*"\(.*\)"/\1/p' plugin.yaml)" \
+            -o "dist/helm-oci${EXT}" .
 
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          distribution: goreleaser
-          version: "~> v2"
-          args: release --clean
+      - name: Package archive
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+          MATRIX_OS: ${{ matrix.os }}
+          MATRIX_ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p release/helm-oci/bin
+          cp plugin.yaml install-binary.sh release/helm-oci/
+          EXT=""
+          if [ "$MATRIX_OS" = "windows" ]; then EXT=".exe"; fi
+          cp "dist/helm-oci${EXT}" release/helm-oci/bin/
+          tar -C release -zcvf "helm-oci-${MATRIX_OS}-${MATRIX_ARCH}.tgz" helm-oci/
 
-      # Produce the Helm plugin provenance file so users can run:
-      #   helm verify helm-oci-<version>.tgz
-      # This step uses the same GPG key that GoReleaser used for the checksum
-      # signature above, so a single key covers all release artifacts.
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: helm-oci-${{ matrix.os }}-${{ matrix.arch }}
+          path: helm-oci-${{ matrix.os }}-${{ matrix.arch }}.tgz
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: helm-oci-*
+          merge-multiple: true
+
       - name: Install Helm
         uses: azure/setup-helm@v4
         with:
           version: 'latest'
 
-      - name: Build Helm plugin provenance (.prov)
+      - name: Package and sign plugin
         env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
           GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
-          TAG: ${{ github.ref_name }}
         run: |
-          # Assemble a minimal plugin source directory that `helm plugin package`
-          # understands (it only needs plugin.yaml and install-binary.sh).
-          mkdir -p staging/helm-oci
-          cp plugin.yaml install-binary.sh staging/helm-oci/
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          gpg --batch --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
+            --export-secret-keys "$GPG_KEY_ID" > /tmp/secring.gpg
+
+          mkdir -p staging/oci
+          cp plugin.yaml install-binary.sh staging/oci/
 
           echo "$GPG_PASSPHRASE" | helm plugin package \
-            staging/helm-oci/ \
+            staging/oci/ \
             --destination dist/ \
             --key "$GPG_KEY_ID" \
             --keyring /tmp/secring.gpg \
             --passphrase-file -
 
-          # Export the public key so release consumers can import it easily.
-          gpg --batch --yes --armor \
-              --export "$GPG_KEY_ID" \
-              > dist/helm-oci-signing-key.asc
+          gpg --batch --yes --armor --export "$GPG_KEY_ID" > dist/helm-oci-signing-key.asc
 
-          # Scrub the secret keyring from disk.
           rm -f /tmp/secring.gpg
 
-      # Attach the provenance file and public key to the GitHub Release that
-      # GoReleaser already created in the previous step.
-      - name: Upload Helm provenance to release
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ steps.version.outputs.VERSION }}
         run: |
-          gh release upload "$TAG" \
-            dist/helm-oci-*.tgz.prov \
-            dist/helm-oci-signing-key.asc \
-            --clobber
+          TITLE=$(git tag -l --format='%(contents:subject)' "$TAG")
+          gh release create "$TAG" \
+            --title "${TITLE:-Release $TAG}" \
+            --generate-notes \
+            dist/helm-oci-*.tgz \
+            dist/oci-*.tgz \
+            dist/oci-*.tgz.prov \
+            dist/helm-oci-signing-key.asc
