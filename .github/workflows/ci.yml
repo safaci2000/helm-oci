@@ -212,12 +212,17 @@ jobs:
           TAG: ${{ steps.version.outputs.VERSION }}
         run: |
           TITLE=$(git tag -l --format='%(contents:subject)' "$TAG")
-          ASSETS=$(echo dist/helm-oci-*.tgz dist/helm-oci-*.tgz.prov)
-          if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release upload "$TAG" $ASSETS --clobber
-          else
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
             gh release create "$TAG" \
               --title "${TITLE:-Release $TAG}" \
-              --generate-notes \
-              $ASSETS
+              --generate-notes
           fi
+          EXISTING=$(gh release view "$TAG" --json assets --jq '.assets[].name')
+          for asset in dist/helm-oci-*.tgz dist/helm-oci-*.tgz.prov; do
+            name=$(basename "$asset")
+            if echo "$EXISTING" | grep -qx "$name"; then
+              echo "Asset $name already exists, skipping"
+            else
+              gh release upload "$TAG" "$asset"
+            fi
+          done
