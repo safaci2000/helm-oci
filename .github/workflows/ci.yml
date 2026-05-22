@@ -160,7 +160,7 @@ jobs:
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
 
-      - name: Import GPG signing key
+      - name: Import GPG signing key & Create signed source package
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
@@ -173,6 +173,20 @@ jobs:
           gpg --batch --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
             --export-secret-keys "$GPG_KEY_ID" > /tmp/secring.gpg
           mv /tmp/secring.gpg ~/.gnupg/secring.gpg
+
+      - name: Create signed source package
+        env:
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          mkdir -p staging/helm-oci
+          cp plugin.yaml install-binary.sh staging/helm-oci/
+          echo "$GPG_PASSPHRASE" | helm plugin package \
+          staging/helm-oci/ \
+          --destination dist/  \
+          --key "$GPG_KEY_ID" \
+          --keyring ~/.gnupg/secring.gpg \
+          --passphrase-file -
 
       - name: Create signed source package
         env:
