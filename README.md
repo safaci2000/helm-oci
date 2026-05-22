@@ -73,7 +73,7 @@ Available Commands:
 ## Installation
 
 ```bash
-helm plugin install oci://ghcr.io/esnet/helm-oci:0.2.0
+helm plugin install oci://ghcr.io/esnet/helm-oci/oci:0.1.13
 ```
 
 Or install from source (requires `--verify=false`):

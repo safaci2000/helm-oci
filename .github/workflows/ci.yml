@@ -167,19 +167,15 @@ jobs:
           gpg --batch --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
             --export-secret-keys "$GPG_KEY_ID" > /tmp/secring.gpg
 
-          mkdir -p staging/helm-oci
-          cp plugin.yaml install-binary.sh staging/helm-oci/
+          mkdir -p staging/oci
+          cp plugin.yaml install-binary.sh staging/oci/
 
           echo "$GPG_PASSPHRASE" | helm plugin package \
-            staging/helm-oci/ \
+            staging/oci/ \
             --destination dist/ \
             --key "$GPG_KEY_ID" \
             --keyring /tmp/secring.gpg \
             --passphrase-file -
-
-          for f in dist/oci-*.tgz dist/oci-*.tgz.prov; do
-            mv "$f" "${f/dist\/oci-/dist\/helm-oci-}"
-          done
 
           rm -f /tmp/secring.gpg
 
@@ -196,8 +192,8 @@ jobs:
       - name: Push to OCI registry
         run: |
           TAG="${GITHUB_REF#refs/tags/v}"
-          PACKAGE=$(ls dist/helm-oci-[0-9]*.tgz | head -1)
-          oras push ghcr.io/esnet/helm-oci:${TAG} \
+          PACKAGE=$(ls dist/oci-[0-9]*.tgz | head -1)
+          oras push ghcr.io/esnet/helm-oci/oci:${TAG} \
             --artifact-type application/vnd.helm.plugin.v1+json \
             ${PACKAGE} \
             ${PACKAGE}.prov
@@ -218,7 +214,7 @@ jobs:
               --generate-notes
           fi
           EXISTING=$(gh release view "$TAG" --json assets --jq '.assets[].name')
-          for asset in dist/helm-oci-*.tgz dist/helm-oci-*.tgz.prov; do
+          for asset in dist/helm-oci-*.tgz dist/oci-*.tgz dist/oci-*.tgz.prov; do
             name=$(basename "$asset")
             if echo "$EXISTING" | grep -qx "$name"; then
               echo "Asset $name already exists, skipping"
