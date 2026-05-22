@@ -171,7 +171,7 @@ jobs:
           echo "$GPG_PRIVATE_KEY" | gpg --batch --import
           gpg --export > ~/.gnupg/pubring.gpg
           gpg --batch --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
-            --export-secret-keys "$GPG_KEYID" > /tmp/secring.gpg
+            --export-secret-keys "$GPG_KEY_ID" > /tmp/secring.gpg
           mv /tmp/secring.gpg ~/.gnupg/secring.gpg
 
       - name: Create signed source package
@@ -183,7 +183,7 @@ jobs:
           cp plugin.yaml install-binary.sh staging/helm-oci/
           echo "$GPG_PASSPHRASE" | helm plugin package staging/helm-oci/ \
           -d dist/
-          --key "$GPG_KEYID" \
+          --key "$GPG_KEY_ID" \
           --keyring ~/.gnupg/secring.gpg \
           --passphrase-file -
 
